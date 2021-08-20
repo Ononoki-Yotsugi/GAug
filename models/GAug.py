@@ -12,15 +12,17 @@ import pickle
 
 class GAug(object):
     def __init__(self, adj_matrix, features, labels, tvt_nids, cuda=-1, hidden_size=128, emb_size=32, n_layers=1, epochs=200, seed=-1, lr=1e-2, weight_decay=5e-4, dropout=0.5, gae=False, beta=0.5, temperature=0.2, log=True, name='debug', warmup=3, gnnlayer_type='gcn', jknet=False, alpha=1, sample_type='add_sample', feat_norm='row'):
+        # done
         self.lr = lr
         self.weight_decay = weight_decay
         self.n_epochs = epochs
-        self.gae = gae
+        self.gae = gae   # bool,标志是否使用GAE
         self.beta = beta
         self.warmup = warmup
         self.feat_norm = feat_norm
         # create a logger, logs are saved to GAug-[name].log when name is not None
         if log:
+            # 这个logger怎么用？可以学一下
             self.logger = self.get_logger(name)
         else:
             # disable logger if wanted
@@ -34,7 +36,7 @@ class GAug(object):
         all_vars = locals()
         self.log_parameters(all_vars)
         # fix random seeds if needed
-        if seed > 0:
+        if seed >= 0:
             np.random.seed(seed)
             torch.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
@@ -57,6 +59,7 @@ class GAug(object):
                                 sample_type=sample_type)
 
     def load_data(self, adj_matrix, features, labels, tvt_nids, gnnlayer_type):
+        #done
         """ preprocess data """
         # features (torch.FloatTensor)
         if isinstance(features, torch.FloatTensor):
@@ -65,23 +68,24 @@ class GAug(object):
             self.features = torch.FloatTensor(features)
         # normalize feature matrix if needed
         if self.feat_norm == 'row':
-            self.features = F.normalize(self.features, p=1, dim=1)
+            self.features = F.normalize(self.features, p=1, dim=1)   # torch提供了这个函数，挺方便的
         elif self.feat_norm == 'col':
             self.features = self.col_normalization(self.features)
         # original adj_matrix for training vgae (torch.FloatTensor)
         assert sp.issparse(adj_matrix)
         if not isinstance(adj_matrix, sp.coo_matrix):
             adj_matrix = sp.coo_matrix(adj_matrix)
-        adj_matrix.setdiag(1)
-        self.adj_orig = scipysp_to_pytorchsp(adj_matrix).to_dense()
+        adj_matrix.setdiag(1)   # 设置自环，防止数据里没有自环
+        self.adj_orig = scipysp_to_pytorchsp(adj_matrix).to_dense()   # 邻接矩阵 tensor
         # normalized adj_matrix used as input for ep_net (torch.sparse.FloatTensor)
         degrees = np.array(adj_matrix.sum(1))
         degree_mat_inv_sqrt = sp.diags(np.power(degrees, -0.5).flatten())
-        adj_norm = degree_mat_inv_sqrt @ adj_matrix @ degree_mat_inv_sqrt
-        self.adj_norm = scipysp_to_pytorchsp(adj_norm)
+        adj_norm = degree_mat_inv_sqrt @ adj_matrix @ degree_mat_inv_sqrt   # 归一化的邻接矩阵 coo_matrix
+        self.adj_norm = scipysp_to_pytorchsp(adj_norm)   # 归一化的邻接矩阵 torch sp
         # adj_matrix used as input for nc_net (torch.sparse.FloatTensor)
+        # 这里提到的ep_net和nc_net分别指什么？
         if gnnlayer_type == 'gcn':
-            self.adj = scipysp_to_pytorchsp(adj_norm)
+            self.adj = scipysp_to_pytorchsp(adj_norm)   # 归一化的邻接矩阵 torch sp
         elif gnnlayer_type == 'gsage':
             adj_matrix_noselfloop = sp.coo_matrix(adj_matrix)
             # adj_matrix_noselfloop.setdiag(0)
@@ -93,27 +97,29 @@ class GAug(object):
             self.adj = torch.FloatTensor(adj_matrix.todense())
         # labels (torch.LongTensor) and train/validation/test nids (np.ndarray)
         if len(labels.shape) == 2:
-            labels = torch.FloatTensor(labels)
+            labels = torch.FloatTensor(labels)   # 应该是针对PPI数据集的
         else:
-            labels = torch.LongTensor(labels)
+            labels = torch.LongTensor(labels)   # 针对正常的数据集
         self.labels = labels
-        self.train_nid = tvt_nids[0]
+        self.train_nid = tvt_nids[0]   # 这里不是mask而是id列表的形式
         self.val_nid = tvt_nids[1]
         self.test_nid = tvt_nids[2]
         # number of classes
         if len(self.labels.size()) == 1:
-            self.out_size = len(torch.unique(self.labels))
+            self.out_size = len(torch.unique(self.labels))   # 类别个数
         else:
-            self.out_size = labels.size(1)
+            self.out_size = labels.size(1)   # 针对PPI数据集的
         # sample the edges to evaluate edge prediction results
         # sample 10% (1% for large graph) of the edges and the same number of no-edges
         if labels.size(0) > 5000:
             edge_frac = 0.01
         else:
             edge_frac = 0.1
-        adj_matrix = sp.csr_matrix(adj_matrix)
-        n_edges_sample = int(edge_frac * adj_matrix.nnz / 2)
+        adj_matrix = sp.csr_matrix(adj_matrix)   # 未归一化的，csr_matrix
+        n_edges_sample = int(edge_frac * adj_matrix.nnz / 2)   # sample边的个数
         # sample negative edges
+        # 这里是随机采样不存在的边，这也意味着不同随机种子采出来的不一样
+        # 显然不包括自环
         neg_edges = []
         added_edges = set()
         while len(neg_edges) < n_edges_sample:
@@ -133,8 +139,9 @@ class GAug(object):
         nz_upper = np.array(sp.triu(adj_matrix, k=1).nonzero()).T
         np.random.shuffle(nz_upper)
         pos_edges = nz_upper[:n_edges_sample]
-        self.val_edges = np.concatenate((pos_edges, neg_edges), axis=0)
-        self.edge_labels = np.array([1]*n_edges_sample + [0]*n_edges_sample)
+        self.val_edges = np.concatenate((pos_edges, neg_edges), axis=0)   # 二维array，存储边
+        self.edge_labels = np.array([1]*n_edges_sample + [0]*n_edges_sample)   # 一维标签
+        # 得到两个变量，分别储存边以及对应标签
 
     def pretrain_ep_net(self, model, adj, features, adj_orig, norm_w, pos_weight, n_epochs):
         """ pretrain the edge prediction network """
@@ -159,6 +166,8 @@ class GAug(object):
 
     def pretrain_nc_net(self, model, adj, features, labels, n_epochs):
         """ pretrain the node classification network """
+        # done
+        # 就是事先训练30个epoch
         optimizer = torch.optim.Adam(model.nc_net.parameters(),
                                      lr=self.lr,
                                      weight_decay=self.weight_decay)
@@ -192,14 +201,15 @@ class GAug(object):
     def fit(self, pretrain_ep=200, pretrain_nc=20):
         """ train the model """
         # move data to device
-        adj_norm = self.adj_norm.to(self.device)
-        adj = self.adj.to(self.device)
-        features = self.features.to(self.device)
+        adj_norm = self.adj_norm.to(self.device)   # 归一化的邻接矩阵,torch sp
+        adj = self.adj.to(self.device)   # 归一化的邻接矩阵,torch sp  这里为什么要有两个一模一样的adj？——好像和不同的模型有关
+        features = self.features.to(self.device)   # tensor
         labels = self.labels.to(self.device)
-        adj_orig = self.adj_orig.to(self.device)
+        adj_orig = self.adj_orig.to(self.device)   # 原始邻接矩阵 tensor
         model = self.model.to(self.device)
         # weights for log_lik loss when training EP net
         adj_t = self.adj_orig
+        # 这两个变量是什么意思啊？是两个常数
         norm_w = adj_t.shape[0]**2 / float((adj_t.shape[0]**2 - adj_t.sum()) * 2)
         pos_weight = torch.FloatTensor([float(adj_t.shape[0]**2 - adj_t.sum()) / adj_t.sum()]).to(self.device)
         # pretrain VGAE if needed
@@ -276,6 +286,7 @@ class GAug(object):
 
     def log_parameters(self, all_vars):
         """ log all variables in the input dict excluding the following ones """
+        # done
         del all_vars['self']
         del all_vars['adj_matrix']
         del all_vars['features']
@@ -294,6 +305,8 @@ class GAug(object):
     @staticmethod
     def eval_node_cls(nc_logits, labels):
         """ evaluate node classification results """
+        # done
+        # 评估F1的方法
         if len(labels.size()) == 2:
             preds = torch.round(torch.sigmoid(nc_logits))
             tp = len(torch.nonzero(preds * labels))
@@ -328,6 +341,7 @@ class GAug(object):
     @staticmethod
     def get_logger(name):
         """ create a nice logger """
+        # done
         logger = logging.getLogger(name)
         # clear handlers if they were created in other runs
         if (logger.hasHandlers()):
@@ -351,6 +365,7 @@ class GAug(object):
     @staticmethod
     def col_normalization(features):
         """ column normalization for feature matrix """
+        # done
         features = features.numpy()
         m = features.mean(axis=0)
         s = features.std(axis=0, ddof=0, keepdims=True) + 1e-12
@@ -376,6 +391,7 @@ class GAug_model(nn.Module):
                  alpha=1,
                  sample_type='add_sample'):
         super(GAug_model, self).__init__()
+        # done
         self.device = device
         self.temperature = temperature
         self.gnnlayer_type = gnnlayer_type
@@ -391,15 +407,20 @@ class GAug_model(nn.Module):
 
     def sample_adj(self, adj_logits):
         """ sample an adj from the predicted edge probabilities of ep_net """
+        # done
+        # 从adj_logits获得离散化的邻接矩阵
         edge_probs = adj_logits / torch.max(adj_logits)
         # sampling
         adj_sampled = pyro.distributions.RelaxedBernoulliStraightThrough(temperature=self.temperature, probs=edge_probs).rsample()
         # making adj_sampled symmetric
+        # 这里同时也去掉了对角元素
         adj_sampled = adj_sampled.triu(1)
         adj_sampled = adj_sampled + adj_sampled.T
         return adj_sampled
 
     def sample_adj_add_bernoulli(self, adj_logits, adj_orig, alpha):
+        # done
+        # adj_logits和原邻接矩阵加权和，并离散化
         edge_probs = adj_logits / torch.max(adj_logits)
         edge_probs = alpha*edge_probs + (1-alpha)*adj_orig
         # sampling
@@ -410,6 +431,8 @@ class GAug_model(nn.Module):
         return adj_sampled
 
     def sample_adj_add_round(self, adj_logits, adj_orig, alpha):
+        # done
+        # 似乎是四舍五入离散化，但是默认不使用这个方法
         edge_probs = adj_logits / torch.max(adj_logits)
         edge_probs = alpha*edge_probs + (1-alpha)*adj_orig
         # sampling
@@ -420,6 +443,8 @@ class GAug_model(nn.Module):
         return adj_sampled
 
     def sample_adj_random(self, adj_logits):
+        # done
+        # 这个好像是随机给结果
         adj_rand = torch.rand(adj_logits.size())
         adj_rand = adj_rand.triu(1)
         adj_rand = torch.round(adj_rand)
@@ -427,6 +452,8 @@ class GAug_model(nn.Module):
         return adj_rand
 
     def sample_adj_edge(self, adj_logits, adj_orig, change_frac):
+        # done
+        # 不管他了，反正用不到
         adj = adj_orig.to_dense() if adj_orig.is_sparse else adj_orig
         n_edges = adj.nonzero().size(0)
         n_change = int(n_edges * change_frac / 2)
@@ -460,6 +487,8 @@ class GAug_model(nn.Module):
         return adj_new
 
     def normalize_adj(self, adj):
+        # done
+        # 又是归一化邻接矩阵的方法
         if self.gnnlayer_type == 'gcn':
             # adj = adj + torch.diag(torch.ones(adj.size(0))).to(self.device)
             adj.fill_diagonal_(1)
@@ -476,7 +505,8 @@ class GAug_model(nn.Module):
         return adj
 
     def forward(self, adj, adj_orig, features):
-        adj_logits = self.ep_net(adj, features)
+        # 这里输入的adj是torch sp
+        adj_logits = self.ep_net(adj, features)   # tensor
         if self.sample_type == 'edge':
             adj_new = self.sample_adj_edge(adj_logits, adj_orig, self.alpha)
         elif self.sample_type == 'add_round':
@@ -488,7 +518,7 @@ class GAug_model(nn.Module):
                 adj_new = self.sample_adj(adj_logits)
             else:
                 adj_new = self.sample_adj_add_bernoulli(adj_logits, adj_orig, self.alpha)
-        adj_new_normed = self.normalize_adj(adj_new)
+        adj_new_normed = self.normalize_adj(adj_new)   # 再次归一化，tensor
         nc_logits = self.nc_net(adj_new_normed, features)
         return nc_logits, adj_logits
 
@@ -522,6 +552,7 @@ class VGAE(nn.Module):
 
 class GNN(nn.Module):
     """ GNN as node classification model """
+    # done
     def __init__(self, dim_feats, dim_h, n_classes, n_layers, activation, dropout, gnnlayer_type='gcn'):
         super(GNN, self).__init__()
         heads = [1] * (n_layers + 1)
@@ -548,6 +579,7 @@ class GNN(nn.Module):
         self.layers.append(gnnlayer(dim_h*heads[-2], n_classes, heads[-1], None, dropout))
 
     def forward(self, adj, features):
+        # 输入的就是归一化过的adj，tensor
         h = features
         for layer in self.layers:
             h = layer(adj, h)
@@ -591,6 +623,8 @@ class GNN_JK(nn.Module):
 
 class GCNLayer(nn.Module):
     """ one layer of GCN """
+    # done
+    # 矩阵相乘的GCN
     def __init__(self, input_dim, output_dim, n_heads, activation, dropout, bias=True):
         super(GCNLayer, self).__init__()
         self.W = nn.Parameter(torch.FloatTensor(input_dim, output_dim))
@@ -767,6 +801,7 @@ class CeilNoGradient(torch.autograd.Function):
 
 
 def scipysp_to_pytorchsp(sp_mx):
+    # done
     """ converts scipy sparse matrix to pytorch sparse matrix """
     if not sp.isspmatrix_coo(sp_mx):
         sp_mx = sp_mx.tocoo()

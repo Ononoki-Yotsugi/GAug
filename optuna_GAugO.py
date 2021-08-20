@@ -38,6 +38,15 @@ def objective(trial):
     adj_orig = pickle.load(open(f'data/graphs/{ds}_adj.pkl', 'rb'))
     features = pickle.load(open(f'data/graphs/{ds}_features.pkl', 'rb'))
     labels = pickle.load(open(f'data/graphs/{ds}_labels.pkl', 'rb'))
+    print(type(tvt_nids))
+    print(tvt_nids)
+    print(type(adj_orig))
+    print(adj_orig)
+    print(type(features))
+    print(features)
+    print(type(labels))
+    print(labels)
+    exit(0)
     if sp.issparse(features):
         features = torch.FloatTensor(features.toarray())
     if ds == 'cora' and args.add_train > 0:
