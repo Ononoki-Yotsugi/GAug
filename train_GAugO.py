@@ -12,6 +12,7 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', type=str, default='cora')
     parser.add_argument('--gnn', type=str, default='gcn')
     parser.add_argument('--gpu', type=str, default='0')
+    parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()
 
     if args.gpu == '-1':
@@ -49,7 +50,7 @@ if __name__ == "__main__":
     accs = []
     for _ in range(1):
         # 怎么做了30次，难道是30次实验吗。好像是的，那说明这个模型挺快。
-        model = GAug(adj_orig, features, labels, tvt_nids, cuda=gpu, gae=True, alpha=params['alpha'], beta=params['beta'], temperature=params['temp'], warmup=0, gnnlayer_type=gnn, jknet=jk, lr=lr, n_layers=n_layers, log=True, feat_norm=feat_norm, seed=0)
+        model = GAug(adj_orig, features, labels, tvt_nids, cuda=gpu, gae=True, alpha=params['alpha'], beta=params['beta'], temperature=params['temp'], warmup=0, gnnlayer_type=gnn, jknet=jk, lr=lr, n_layers=n_layers, log=True, feat_norm=feat_norm, seed=args.seed)
         acc = model.fit(pretrain_ep=params['pretrain_ep'], pretrain_nc=params['pretrain_nc'])
         accs.append(acc)
     print(f'Micro F1: {np.mean(accs):.6f}, std: {np.std(accs):.6f}')

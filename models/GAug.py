@@ -9,6 +9,7 @@ import pyro
 from itertools import combinations
 from sklearn.metrics import roc_auc_score, average_precision_score
 import pickle
+import math
 
 class GAug(object):
     def __init__(self, adj_matrix, features, labels, tvt_nids, cuda=-1, hidden_size=128, emb_size=32, n_layers=1, epochs=200, seed=-1, lr=1e-2, weight_decay=5e-4, dropout=0.5, gae=False, beta=0.5, temperature=0.2, log=True, name='debug', warmup=3, gnnlayer_type='gcn', jknet=False, alpha=1, sample_type='add_sample', feat_norm='row'):
@@ -637,7 +638,8 @@ class GCNLayer(nn.Module):
             self.dropout = nn.Dropout(p=dropout)
         else:
             self.dropout = 0
-        self.init_params()
+        #self.init_params()
+        self.reset_parameters()
 
     def init_params(self):
         """ Initialize weights with xavier uniform and biases with all zeros """
@@ -646,6 +648,12 @@ class GCNLayer(nn.Module):
                 nn.init.xavier_uniform_(param)
             else:
                 nn.init.constant_(param, 0.0)
+
+    def reset_parameters(self):
+        stdv = 1. / math.sqrt(self.W.size(1))
+        self.W.data.uniform_(-stdv, stdv)
+        if self.b is not None:
+            self.b.data.uniform_(-stdv, stdv)
 
     def forward(self, adj, h):
         if self.dropout:
